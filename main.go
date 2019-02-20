@@ -6,8 +6,9 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
@@ -139,16 +140,16 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 	var loginUser User
 	db.Where(&User{Username: user.Username}).Find(&loginUser)
 	if CheckPasswordHash(user.Password, loginUser.Password) {
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"username": loginUser.Username,
-			"password": loginUser.Password,
-			"email":    loginUser.Email,
-		})
-		secret := "secretskylab"
-		tokenString, err := token.SignedString(secret)
-		tokenRes := Token{Token: tokenString}
-		fmt.Print("Token:" + tokenString + "err:" + err)
-		js, _ := json.Marshal(tokenRes)
+		tokenString, err := GenerateJWT(loginUser)
+		token := Token{Token: tokenString}
+		js, _ := json.Marshal(token)
+		if err != nil {
+			errorText := Error{Code: "AUTHERRTOKEN", Message: "Internal server error"}
+			js, _ := json.Marshal(errorText)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(js)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -169,4 +170,27 @@ func HashPassword(password string) (string, error) {
 func CheckPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
+}
+
+func GenerateJWT(user User) (string, error) {
+	var mySigningKey = []byte("SUPERSECRET")
+	token := jwt.New(jwt.SigningMethodHS256)
+	claims := token.Claims.(jwt.MapClaims)
+
+	fmt.Println(user)
+
+	claims["authorized"] = true
+	claims["name"] = user.Name
+	claims["email"] = user.Email
+	claims["username"] = user.Username
+	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
+
+	tokenString, err := token.SignedString(mySigningKey)
+
+	if err != nil {
+		fmt.Errorf("Something went wrong: %s", err.Error())
+		return "", err
+	}
+
+	return tokenString, nil
 }

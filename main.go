@@ -29,7 +29,7 @@ func main() {
 	defer db.Close()
 	db.AutoMigrate(&User{}, &Article{})
 	router.HandleFunc("/users", addUser).Methods("POST")
-	// router.HandleFunc("/user/{username}", getUser).Methods("GET")
+	router.HandleFunc("/user/{username}", getUser).Methods("GET")
 	router.HandleFunc("/user", loginUser).Methods("POST")
 	handler := cors.Default().Handler(router)
 	log.Fatal(http.ListenAndServe(":8080", handler))
@@ -119,20 +119,20 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(&user)
 }
 
-// func getUser(w http.ResponseWriter, r *http.Request) {
-// 	params := mux.Vars(r)
-// 	var user User
-// 	var loginUser User
-// 	json.NewEncoder(w).Encode(&user)
-// 	db.Where(&User{Username: user.Username}).Find(&loginUser)
-// 	if CheckPasswordHash(user.Password, loginUser.Password) {
-// 		token := Token{Token: "Ok"}
-// 		js, _ := json.Marshal(token)
-// 		w.Header().Set("Content-Type", "application/json")
-// 		w.Write(js)
-// 		return
-// 	}
-// }
+func getUser(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	var user User
+	db.Where(&User{Username: params["username"]}).Find(&user)
+	if len(user.ID) < 1 {
+		errorText := Error{Code: "USERNOTFND", Message: "No user exists with username " + params["username"]}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(&user)
+}
 
 func loginUser(w http.ResponseWriter, r *http.Request) {
 	var user User

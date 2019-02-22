@@ -116,7 +116,18 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	user.Password = password
 	user.ID = uuidString.String()
 	db.Create(&user)
-	json.NewEncoder(w).Encode(&user)
+	tokenString, err := GenerateJWT(user)
+	token := Token{Token: tokenString}
+	js, _ := json.Marshal(token)
+	if err != nil {
+		errorText := Error{Code: "AUTHERRTOKEN", Message: "Internal server error"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(js)
 }
 
 func getUser(w http.ResponseWriter, r *http.Request) {

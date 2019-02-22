@@ -17,7 +17,6 @@ type User struct {
 	Name     string
 	Password string
 	Email    string
-	Articles []Article
 }
 
 type Article struct {
@@ -25,6 +24,7 @@ type Article struct {
 	Title     string
 	Desc      string
 	Content   string
+	Username  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt time.Time

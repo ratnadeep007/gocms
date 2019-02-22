@@ -1,17 +1,20 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
+	"github.com/mitchellh/mapstructure"
 	"github.com/rs/cors"
 	uuid "github.com/satori/go.uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -31,6 +34,9 @@ func main() {
 	router.HandleFunc("/users", addUser).Methods("POST")
 	router.HandleFunc("/user/{username}", getUser).Methods("GET")
 	router.HandleFunc("/user", loginUser).Methods("POST")
+	// router.HandleFunc("/articles").Methods("GET")
+	router.HandleFunc("/article/{id}", getArticle).Methods("GET")
+	router.HandleFunc("/article", addArticle).Methods("POST")
 	handler := cors.Default().Handler(router)
 	log.Fatal(http.ListenAndServe(":8080", handler))
 }
@@ -173,6 +179,78 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func addArticle(w http.ResponseWriter, r *http.Request) {
+	var article Article
+	var user User
+	json.NewDecoder(r.Body).Decode(&article)
+	authHeader := r.Header.Get("Authorization")
+	authToken := strings.Split(authHeader, " ")
+	token, err := jwt.Parse(authToken[1], func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("There was an error")
+		}
+		return []byte("SUPERSECRET"), nil
+	})
+	if err != nil {
+		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	if token.Valid {
+		mapstructure.Decode(token.Claims, &user)
+		fmt.Println(user)
+	} else {
+		errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	// Validation
+	if article.Title == "" {
+		errorText := Error{Code: "MODLARTL001", Message: "Article title is required"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	if article.Content == "" {
+		errorText := Error{Code: "MODLARTL002", Message: "Article content is required"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	if article.Desc == "" {
+		errorText := Error{Code: "MODLARTL003", Message: "Article description is required"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	str := EncodeString(string(article.Title + "-" + article.Desc))
+	article.Title = article.Title + "-" + str
+	uuidString, err := uuid.NewV4()
+	if err != nil {
+		errorText := Error{Code: "UUIDERR", Message: "Internal Server Error Occured"}
+		js, _ := json.Marshal(errorText)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	article.ID = uuidString.String()
+	article.Username = user.Username
+	db.Create(&article)
+	json.NewEncoder(w).Encode(&article)
+}
+
+func getArticle(w http.ResponseWriter, r *http.Request) {
+
+}
+
+// Miscellaneous functions
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	return string(bytes), err
@@ -204,4 +282,9 @@ func GenerateJWT(user User) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+func EncodeString(str string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(str))
+	return encoded
 }

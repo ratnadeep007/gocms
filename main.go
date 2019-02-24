@@ -34,7 +34,8 @@ func main() {
 	router.HandleFunc("/users", addUser).Methods("POST")
 	router.HandleFunc("/user/{username}", getUser).Methods("GET")
 	router.HandleFunc("/user", loginUser).Methods("POST")
-	// router.HandleFunc("/articles").Methods("GET")
+	router.HandleFunc("/articles", getArticles).Methods("GET")
+	router.HandleFunc("/articles/{username}", getArticles).Methods("GET")
 	router.HandleFunc("/article/{id}", getArticle).Methods("GET")
 	router.HandleFunc("/article", addArticle).Methods("POST")
 	handler := cors.Default().Handler(router)
@@ -201,12 +202,7 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&article)
 	authHeader := r.Header.Get("Authorization")
 	authToken := strings.Split(authHeader, " ")
-	token, err := jwt.Parse(authToken[1], func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("There was an error")
-		}
-		return []byte("SUPERSECRET"), nil
-	})
+	token, err := verifyToken(authToken[1])
 	if err != nil {
 		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
 		js, _ := json.Marshal(errorText)
@@ -287,6 +283,42 @@ func getArticle(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(&article)
 }
 
+func getArticles(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	var articles []Article
+	var user User
+	if params["username"] == "" {
+		db.Raw("SELECT * FROM articles").Scan(&articles)
+	} else if params["username"] == "my-articles" {
+		authHeader := r.Header.Get("Authorization")
+		authToken := strings.Split(authHeader, " ")
+		token, err := verifyToken(authToken[1])
+		if err != nil {
+			errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
+			js, _ := json.Marshal(errorText)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(js)
+			return
+		}
+		if token.Valid {
+			mapstructure.Decode(token.Claims, &user)
+		} else {
+			errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
+			js, _ := json.Marshal(errorText)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(js)
+			return
+		}
+		db.Raw("SELECT * FROM articles WHERE username = ?", user.Username).Scan(&articles)
+	} else {
+		db.Raw("SELECT * FROM articles WHERE username = ?", params["username"]).Scan(&articles)
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(&articles)
+}
+
 // Miscellaneous functions
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
@@ -319,6 +351,16 @@ func GenerateJWT(user User) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+func verifyToken(authToken string) (*jwt.Token, error) {
+	token, err := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("There was an error")
+		}
+		return []byte("SUPERSECRET"), nil
+	})
+	return token, err
 }
 
 func EncodeString(str string) string {

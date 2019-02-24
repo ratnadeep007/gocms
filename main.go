@@ -48,6 +48,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if user.Username == "" {
 		errorText := Error{Code: "MODLUSR004", Message: "Username is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -55,6 +56,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if user.Name == "" {
 		errorText := Error{Code: "MODLUSR001", Message: "Name is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -62,6 +64,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if user.Password == "" {
 		errorText := Error{Code: "MODLUSR002", Message: "Password is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Contenet-Type", "application/json")
 		w.Write(js)
 		return
@@ -69,6 +72,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if user.Email == "" {
 		errorText := Error{Code: "MODLUSR003", Message: "Email is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "applicaton/json")
 		w.Write(js)
 		return
@@ -77,6 +81,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if !match {
 		errorText := Error{Code: "MODLIUSR004", Message: "Enter email in valid format"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -91,6 +96,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if dupUserUsername.Username != "" {
 		errorText := Error{Code: "DBDUPLUSRNME", Message: "Username is already present"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -98,6 +104,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if dupUserEmail.Email != "" {
 		errorText := Error{Code: "DBDUPLEMAIL", Message: "Email is already registerd"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -107,6 +114,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorText := Error{Code: "BCRYPTERR", Message: "Internal Server Error Occured"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -115,6 +123,7 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorText := Error{Code: "UUIDERR", Message: "Internal Server Error Occured"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -128,10 +137,12 @@ func addUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorText := Error{Code: "AUTHERRTOKEN", Message: "Internal server error"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(js)
 }
@@ -143,10 +154,12 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	if len(user.ID) < 1 {
 		errorText := Error{Code: "USERNOTFND", Message: "No user exists with username " + params["username"]}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusNotFound)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(&user)
 }
@@ -163,16 +176,19 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			errorText := Error{Code: "AUTHERRTOKEN", Message: "Internal server error"}
 			js, _ := json.Marshal(errorText)
+			w.WriteHeader(http.StatusInternalServerError)
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(js)
 			return
 		}
+		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
 	} else {
 		errorText := Error{Code: "AUTHERRLOGIN", Message: "Username or password is not valid"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusUnauthorized)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -194,16 +210,17 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
 	}
 	if token.Valid {
 		mapstructure.Decode(token.Claims, &user)
-		fmt.Println(user)
 	} else {
 		errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusUnauthorized)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -212,6 +229,7 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 	if article.Title == "" {
 		errorText := Error{Code: "MODLARTL001", Message: "Article title is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -219,6 +237,7 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 	if article.Content == "" {
 		errorText := Error{Code: "MODLARTL002", Message: "Article content is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -226,16 +245,19 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 	if article.Desc == "" {
 		errorText := Error{Code: "MODLARTL003", Message: "Article description is required"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
 	}
 	str := EncodeString(string(article.Title + "-" + article.Desc))
 	article.Title = article.Title + "-" + str
+	article.Title = strings.Replace(article.Title, " ", "-", -1)
 	uuidString, err := uuid.NewV4()
 	if err != nil {
 		errorText := Error{Code: "UUIDERR", Message: "Internal Server Error Occured"}
 		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 		return
@@ -247,7 +269,22 @@ func addArticle(w http.ResponseWriter, r *http.Request) {
 }
 
 func getArticle(w http.ResponseWriter, r *http.Request) {
-
+	params := mux.Vars(r)
+	var article Article
+	fmt.Println(params["id"])
+	// Don't know whty db.Where(&Article{Title: params["id"]}).Find(&article) is not working
+	db.Raw("SELECT * from articles WHERE title = ?", params["id"]).Scan(&article)
+	fmt.Println(article)
+	if len(article.Title) < 1 {
+		errorText := Error{Code: "ARTLNOTFND", Message: "No article such exists"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(&article)
 }
 
 // Miscellaneous functions

@@ -38,3 +38,11 @@ type Error struct {
 type Token struct {
 	Token string
 }
+
+type MFile struct {
+	ID       string `gorm:"primary_key"`
+	Name     string
+	Checksum string
+	Size     string
+	Link     string
+}

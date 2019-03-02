@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
+	"github.com/minio/minio-go"
 	"github.com/mitchellh/mapstructure"
 	"github.com/rs/cors"
 	uuid "github.com/satori/go.uuid"
@@ -22,8 +28,23 @@ import (
 
 var db *gorm.DB
 var err error
+var minioClient *minio.Client
 
 func main() {
+
+	// minio start
+	endpoint := "127.0.0.1:9000"
+	accessKeyID := "NPtuYx684U7FIDg97SLL3pU3kzV1n4Yt"
+	secretKeyID := "W0Rpu3g06aXBiuAY6ygcZPnzBBlFQV5l"
+	useSSL := false
+
+	minioClient, err = minio.New(endpoint, accessKeyID, secretKeyID, useSSL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	// log.Printf("%#v\n", minioClient)
+	// minio end
+
 	router := mux.NewRouter()
 	db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres dbname=cms password=mysecretpassword sslmode=disable")
 	if err != nil {
@@ -38,6 +59,9 @@ func main() {
 	router.HandleFunc("/articles/{username}", getArticles).Methods("GET")
 	router.HandleFunc("/article/{id}", getArticle).Methods("GET")
 	router.HandleFunc("/article", addArticle).Methods("POST")
+	router.HandleFunc("/file", uploadFile).Methods("POST")
+	router.HandleFunc("/files", getAllFiles).Methods("GET")
+	router.HandleFunc("/file/{filename}", getFile).Methods("GET")
 	handler := cors.Default().Handler(router)
 	log.Fatal(http.ListenAndServe(":8080", handler))
 }
@@ -317,6 +341,107 @@ func getArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(&articles)
+}
+
+func uploadFile(w http.ResponseWriter, r *http.Request) {
+	var Buf bytes.Buffer
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		errorText := Error{Code: "FILEUPLOADERR", Message: "File not found. Check your parameters"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	defer file.Close()
+	name := strings.Split(header.Filename, ".")
+	fmt.Printf("File name %s\n", name[0])
+	io.Copy(&Buf, file)
+	err = ioutil.WriteFile(header.Filename, Buf.Bytes(), 0644)
+	minioFile, err := os.Open(header.Filename)
+	if err != nil {
+		errorText := Error{Code: "FILEUPLOADERR", Message: "Internal server error"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	minioFileStat, err := minioFile.Stat()
+	defer func() {
+		if err := minioFile.Close(); err != nil {
+			errorText := Error{Code: "FILEUPLOADERR", Message: "Internal server error"}
+			js, _ := json.Marshal(errorText)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(js)
+			return
+		}
+	}()
+	contentType := strings.Split(minioFile.Name(), ".")[1]
+	uploadedFile, err := minioClient.PutObject("testbucket", header.Filename, minioFile, minioFileStat.Size(), minio.PutObjectOptions{ContentType: "image/" + contentType})
+	if err != nil {
+		errorText := Error{Code: "FILEUPLOADERR", Message: "Internal server error"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	fmt.Print(uploadedFile)
+	os.Remove(header.Filename)
+	Buf.Reset()
+	errorText := Error{Code: "FILEUPLOADSUCC-" + strconv.FormatInt(uploadedFile, 10), Message: "File uploaded successfully"}
+	js, _ := json.Marshal(errorText)
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(js)
+}
+
+func getAllFiles(w http.ResponseWriter, r *http.Request) {
+	var mfiles []MFile
+	doneCh := make(chan struct{})
+
+	defer close(doneCh)
+
+	isRecursive := true
+
+	objectCh := minioClient.ListObjectsV2("testbucket", "", isRecursive, doneCh)
+
+	for object := range objectCh {
+		if object.Err != nil {
+			fmt.Print(object.Err)
+			return
+		}
+		mfiles = append(mfiles, MFile{Name: object.Key, Size: string(object.Size), Checksum: object.ETag, Link: "http://localhost:8080/file/" + object.Key})
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(&mfiles)
+}
+
+func getFile(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	filename := params["filename"]
+	// object, err := minioClient.GetObject("testbucket", filename, minio.GetObjectOptions{})
+	err := minioClient.FGetObject("testbucket", filename, filename, minio.GetObjectOptions{})
+	if err != nil {
+		panic(err)
+	}
+	file, err := os.Open(filename)
+	FileHeader := make([]byte, 512)
+	file.Read(FileHeader)
+	FileContentType := http.DetectContentType(FileHeader)
+	FileStat, _ := file.Stat()
+	FileSize := strconv.FormatInt(FileStat.Size(), 10)
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+	w.Header().Set("Content-Type", FileContentType)
+	w.Header().Set("Content-Length", FileSize)
+	file.Seek(0, 0)
+	io.Copy(w, file)
+	os.Remove(filename)
+	return
 }
 
 // Miscellaneous functions

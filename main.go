@@ -51,7 +51,7 @@ func main() {
 		panic("failed to connect database")
 	}
 	defer db.Close()
-	db.AutoMigrate(&User{}, &Article{})
+	db.AutoMigrate(&User{}, &Article{}, &MFile{})
 	router.HandleFunc("/users", addUser).Methods("POST")
 	router.HandleFunc("/user/{username}", getUser).Methods("GET")
 	router.HandleFunc("/user", loginUser).Methods("POST")
@@ -345,6 +345,28 @@ func getArticles(w http.ResponseWriter, r *http.Request) {
 
 func uploadFile(w http.ResponseWriter, r *http.Request) {
 	var Buf bytes.Buffer
+	var user User
+	authHeader := r.Header.Get("Authorization")
+	authToken := strings.Split(authHeader, " ")
+	token, err := verifyToken(authToken[1])
+	if err != nil {
+		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	if token.Valid {
+		mapstructure.Decode(token.Claims, &user)
+	} else {
+		errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		errorText := Error{Code: "FILEUPLOADERR", Message: "File not found. Check your parameters"}
@@ -380,7 +402,8 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	contentType := strings.Split(minioFile.Name(), ".")[1]
-	uploadedFile, err := minioClient.PutObject("testbucket", header.Filename, minioFile, minioFileStat.Size(), minio.PutObjectOptions{ContentType: "image/" + contentType})
+	uploadFile, err := minioClient.PutObject("testbucket", header.Filename, minioFile, minioFileStat.Size(), minio.PutObjectOptions{ContentType: "image/" + contentType})
+	fmt.Print(uploadFile)
 	if err != nil {
 		errorText := Error{Code: "FILEUPLOADERR", Message: "Internal server error"}
 		js, _ := json.Marshal(errorText)
@@ -389,11 +412,13 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		w.Write(js)
 		return
 	}
-	fmt.Print(uploadedFile)
+	data := EncodeString(header.Filename + string(minioFileStat.Size()))
+	mFile := &MFile{ID: data, Name: header.Filename, Size: string(minioFileStat.Size()), Username: string(user.Username), Link: "http://localhost:8080/file/" + header.Filename, MinioLink: "https://localhost:9000/" + "testbucket/" + header.Filename}
+	db.Create(&mFile)
 	os.Remove(header.Filename)
 	Buf.Reset()
-	errorText := Error{Code: "FILEUPLOADSUCC-" + strconv.FormatInt(uploadedFile, 10), Message: "File uploaded successfully"}
-	js, _ := json.Marshal(errorText)
+	// errorText := Error{Code: "FILEUPLOADSUCC-" + strconv.FormatInt(uploadedFile, 10), Message: "File uploaded successfully"}
+	js, _ := json.Marshal(mFile)
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(js)
@@ -401,23 +426,49 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 
 func getAllFiles(w http.ResponseWriter, r *http.Request) {
 	var mfiles []MFile
-	doneCh := make(chan struct{})
-
-	defer close(doneCh)
-
-	isRecursive := true
-
-	objectCh := minioClient.ListObjectsV2("testbucket", "", isRecursive, doneCh)
-
-	for object := range objectCh {
-		if object.Err != nil {
-			fmt.Print(object.Err)
-			return
-		}
-		mfiles = append(mfiles, MFile{Name: object.Key, Size: string(object.Size), Checksum: object.ETag, Link: "http://localhost:8080/file/" + object.Key})
+	var user User
+	authHeader := r.Header.Get("Authorization")
+	authToken := strings.Split(authHeader, " ")
+	token, err := verifyToken(authToken[1])
+	if err != nil {
+		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
 	}
+	if token.Valid {
+		mapstructure.Decode(token.Claims, &user)
+	} else {
+		errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	fmt.Println(user.Username)
+	db.Raw("SELECT * FROM m_files WHERE username = ?", string(user.Username)).Scan(&mfiles)
+	fmt.Print(mfiles)
+	// doneCh := make(chan struct{})
+
+	// defer close(doneCh)
+
+	// isRecursive := true
+
+	// objectCh := minioClient.ListObjectsV2("testbucket", "", isRecursive, doneCh)
+
+	// for object := range objectCh {
+	// 	if object.Err != nil {
+	// 		fmt.Print(object.Err)
+	// 		return
+	// 	}
+	// 	mfiles = append(mfiles, MFile{Name: object.Key, Size: string(object.Size), Link: "http://localhost:8080/file/" + object.Key})
+	// }
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(&mfiles)
+
 }
 
 func getFile(w http.ResponseWriter, r *http.Request) {

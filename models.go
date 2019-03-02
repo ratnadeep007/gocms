@@ -40,9 +40,10 @@ type Token struct {
 }
 
 type MFile struct {
-	ID       string `gorm:"primary_key"`
-	Name     string
-	Checksum string
-	Size     string
-	Link     string
+	ID        string `gorm:"primary_key"`
+	Name      string
+	Size      string
+	Link      string
+	MinioLink string
+	Username  string
 }

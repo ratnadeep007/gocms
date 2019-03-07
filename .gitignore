@@ -1,2 +1,4 @@
 .vscode
 rest-api-tut
+node_modules
+server/server

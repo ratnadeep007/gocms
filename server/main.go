@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cavaliercoder/grab"
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
@@ -62,6 +63,7 @@ func main() {
 	router.HandleFunc("/file", uploadFile).Methods("POST")
 	router.HandleFunc("/files", getAllFiles).Methods("GET")
 	router.HandleFunc("/file/{filename}", getFile).Methods("GET")
+	router.HandleFunc("/file/downloadext", downloadFromExternalSource).Methods("POST")
 	handler := cors.Default().Handler(router)
 	log.Fatal(http.ListenAndServe(":8080", handler))
 }
@@ -493,6 +495,95 @@ func getFile(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, file)
 	os.Remove(filename)
 	return
+}
+
+func downloadFromExternalSource(w http.ResponseWriter, r *http.Request) {
+	var downFile DownloadURL
+	var user User
+	authHeader := r.Header.Get("Authorization")
+	authToken := strings.Split(authHeader, " ")
+	token, err := verifyToken(authToken[1])
+	if err != nil {
+		errorText := Error{Code: "ERRTOKEN", Message: "Internal Server Error Occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	if token.Valid {
+		mapstructure.Decode(token.Claims, &user)
+	} else {
+		errorText := Error{Code: "ERRAUTH", Message: "Invalid token"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+	json.NewDecoder(r.Body).Decode(&downFile)
+	fileToDownload := downFile.Url
+
+	resp, err := grab.Get(".", fileToDownload)
+	if err != nil {
+		print(fileToDownload)
+		print(" ")
+		print(err.Error())
+		errorText := Error{Code: "GRABERR", Message: "Internal server error occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+
+	print(resp.Filename)
+
+	file, err := os.Open(resp.Filename)
+	if err != nil {
+		errorText := Error{Code: "OSERR", Message: "Internal server error occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+
+	contentType := strings.Split(file.Name(), ".")[1]
+
+	defer file.Close()
+	defer os.Remove(resp.Filename)
+
+	fileStat, err := file.Stat()
+	if err != nil {
+		errorText := Error{Code: "OSERR", Message: "Internal server error occured"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+
+	uploadFile, err := minioClient.PutObject("testbucket", resp.Filename, file, fileStat.Size(), minio.PutObjectOptions{ContentType: "image/" + contentType})
+	fmt.Print(uploadFile)
+	if err != nil {
+		errorText := Error{Code: "FILEUPLOADERR", Message: "Internal server error"}
+		js, _ := json.Marshal(errorText)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		return
+	}
+
+	data := EncodeString(resp.Filename + string(fileStat.Size()))
+	mFile := &MFile{ID: data, Name: resp.Filename, Size: string(fileStat.Size()), Username: string(user.Username), Link: "http://localhost:8080/file/" + resp.Filename, MinioLink: "https://localhost:9000/" + "testbucket/" + resp.Filename}
+	db.Create(&mFile)
+
+	errorText := Error{Code: "SUCC", Message: "Download Successfull"}
+	js, _ := json.Marshal(errorText)
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(js)
 }
 
 // Miscellaneous functions

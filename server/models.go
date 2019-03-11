@@ -47,3 +47,7 @@ type MFile struct {
 	MinioLink string
 	Username  string
 }
+
+type DownloadURL struct {
+	Url string
+}
